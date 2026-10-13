@@ -385,7 +385,7 @@
       <div class="eyebrow">A tiny surprise 🎀</div>
       <h1>Hey, Saranya!</h1>
       <p class="subtitle">
-        I (Arka) made a little digital surprise especially for you.
+        Someone made a little digital surprise especially for you.
         Are you ready to open it? 👀
       </p>
 
@@ -426,12 +426,14 @@
         <div class="cake-base"></div>
       </div>
 
-      <p class="hint">Tap the button to make a wish and blow out the candles 🕯️</p>
+      <p class="hint">🌬️ BIRTHDAY BLOW CHALLENGE: Take a breath, then blow steadily toward your phone’s microphone to put out all 3 candles!</p>
 
       <div class="controls">
-        <button id="wishButton">MAKE A WISH 🕯️</button>
+        <button id="wishButton">START BLOW CHALLENGE 🌬️</button>
         <button class="secondary" id="againButton">SEE IT AGAIN 🔁</button>
       </div>
+
+      <p id="blowStatus" class="hint" role="status">Ready when you are! Tap “START BLOW CHALLENGE” and allow microphone access.</p>
 
       <div id="wishMessage" class="message hidden">
         <h2>✨ Wish made! ✨</h2>
@@ -468,6 +470,12 @@
     const wishButton = document.getElementById("wishButton");
     const againButton = document.getElementById("againButton");
     const wishMessage = document.getElementById("wishMessage");
+    const blowStatus = document.getElementById("blowStatus");
+    let micStream = null;
+    let audioContext = null;
+    let blowFrame = null;
+    let loudFrames = 0;
+    let challengeRunning = false;
 
     function openGift() {
       welcome.classList.add("hidden");
@@ -490,7 +498,83 @@
       }
     }
 
-    function makeWish() {
+    async function makeWish() {
+      if (challengeRunning) return;
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        blowStatus.textContent = "This browser can’t use the microphone here. Tap this message to blow out the candles instead.";
+        blowStatus.style.cursor = "pointer";
+        blowStatus.onclick = finishWish;
+        return;
+      }
+
+      try {
+        blowStatus.textContent = "Allow microphone access, then blow steadily toward your phone’s mic! 🌬️";
+        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioContext.createMediaStreamSource(micStream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 1024;
+        source.connect(analyser);
+        const samples = new Uint8Array(analyser.fftSize);
+        challengeRunning = true;
+        loudFrames = 0;
+        wishButton.textContent = "BLOW, BLOW, BLOW! 🌬️";
+        blowStatus.textContent = "Challenge started! Blow steadily toward the microphone for a moment. 🎂";
+
+        const listen = () => {
+          if (!challengeRunning) return;
+          analyser.getByteTimeDomainData(samples);
+          let sum = 0;
+          for (let i = 0; i < samples.length; i++) {
+            const value = (samples[i] - 128) / 128;
+            sum += value * value;
+          }
+          const rms = Math.sqrt(sum / samples.length);
+
+          // Microphone loudness is only an approximation of blowing air.
+          if (rms > 0.085) {
+            loudFrames++;
+            blowStatus.textContent = loudFrames > 12
+              ? "Great blowing! Keep it going a little longer! 💨"
+              : "I can hear you! Keep blowing steadily! 🌬️";
+          } else {
+            loudFrames = Math.max(0, loudFrames - 2);
+            if (loudFrames === 0) {
+              blowStatus.textContent = "Keep going! Blow steadily toward the microphone. 🕯️";
+            }
+          }
+
+          if (loudFrames >= 28) {
+            finishWish();
+            return;
+          }
+          blowFrame = requestAnimationFrame(listen);
+        };
+        listen();
+      } catch (error) {
+        blowStatus.textContent = "Mic access wasn’t available. Tap this message to blow out the candles anyway 💗";
+        blowStatus.style.cursor = "pointer";
+        blowStatus.onclick = finishWish;
+      }
+    }
+
+    function stopListening() {
+      challengeRunning = false;
+      if (blowFrame) cancelAnimationFrame(blowFrame);
+      blowFrame = null;
+      if (micStream) {
+        micStream.getTracks().forEach(track => track.stop());
+        micStream = null;
+      }
+      if (audioContext) {
+        audioContext.close().catch(() => {});
+        audioContext = null;
+      }
+    }
+
+    function finishWish() {
+      stopListening();
       document.querySelectorAll(".flame").forEach(flame => {
         flame.classList.add("off");
       });
@@ -498,19 +582,26 @@
       wishButton.textContent = "WISH GRANTED ✨";
       wishButton.disabled = true;
       wishButton.style.opacity = ".7";
+      blowStatus.textContent = "Challenge complete! All three candles are out. Make your wish! ✨";
+      blowStatus.style.cursor = "default";
+      blowStatus.onclick = null;
       burst();
     }
 
     function seeAgain() {
+      stopListening();
       birthday.classList.add("hidden");
       welcome.classList.remove("hidden");
       wishMessage.classList.add("hidden");
       document.querySelectorAll(".flame").forEach(flame => {
         flame.classList.remove("off");
       });
-      wishButton.textContent = "MAKE A WISH 🕯️";
+      wishButton.textContent = "START BLOW CHALLENGE 🌬️";
       wishButton.disabled = false;
       wishButton.style.opacity = "1";
+      blowStatus.textContent = "Ready when you are! Tap “START BLOW CHALLENGE” and allow microphone access.";
+      blowStatus.style.cursor = "default";
+      blowStatus.onclick = null;
     }
 
     openButton.addEventListener("click", openGift);
